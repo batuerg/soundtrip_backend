@@ -1,63 +1,102 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, redirect, jsonify
 
 app = Flask(__name__)
 
+# Ortam değişkenlerinden alınan bilgiler
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REDIRECT_URI = os.getenv("REDIRECT_URI")  # Railway: https://soundtripbackend-production.up.railway.app/callback
+
+# Spotify OAuth için gerekli URL'ler ve kapsamlar
+SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
+SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
+SCOPE = "user-top-read user-read-recently-played"
+
 @app.route('/')
-def hello():
+def home():
     return "Welcome to SoundTrip! Integration successful, you can return back to Sound Trip on your browser to continue"
 
+# /login: Kullanıcıyı Spotify yetkilendirme sayfasına yönlendirir
+@app.route('/login')
+def login():
+    auth_query = f"?response_type=code&client_id={CLIENT_ID}&scope={SCOPE}&redirect_uri={REDIRECT_URI}"
+    return redirect(SPOTIFY_AUTH_URL + auth_query)
+
+# /callback: Spotify, kullanıcı yetkilendirmesi sonrası bu endpoint'e yönlendirir
+@app.route('/callback')
+def callback():
+    code = request.args.get('code')
+    if not code:
+        return "Authentication failed: code not provided.", 400
+
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    token_response = requests.post(SPOTIFY_TOKEN_URL, data=payload, headers=headers)
+    token_info = token_response.json()
+
+    access_token = token_info.get("access_token")
+    if not access_token:
+        return "Token exchange failed.", 400
+
+    # Kullanıcıyı /spotify_list endpoint'ine yönlendiriyoruz, access_token URL'e ekleniyor.
+    return redirect(f"/spotify_list?access_token={access_token}")
+
+# /spotify_list: Kullanıcının son 6 ayın top track verisini ve her şarkının BPM bilgisini döner
 @app.route('/spotify_list', methods=['GET'])
 def spotify_list():
-    # Kullanıcıdan access_token'ı query parametresi olarak alıyoruz.
     access_token = request.args.get('access_token')
     if not access_token:
         return jsonify({"error": "Access token eksik"}), 400
 
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-    
-    # Kullanıcının son 6 ayda en çok dinlediği şarkıları (medium_term) çekiyoruz.
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # Kullanıcının medium_term (son 6 ay) top tracks'ini çekiyoruz.
     top_tracks_url = "https://api.spotify.com/v1/me/top/tracks"
     params = {
-        "time_range": "medium_term",  # Son 6 ay
-        "limit": 20  # Örnek olarak 20 şarkı alıyoruz, bunu ihtiyacına göre ayarlayabilirsin.
+        "time_range": "medium_term",
+        "limit": 20
     }
     top_tracks_response = requests.get(top_tracks_url, headers=headers, params=params)
-    
     if top_tracks_response.status_code != 200:
-        return jsonify({"error": "Spotify top tracks isteği başarısız", 
-                        "status_code": top_tracks_response.status_code}), 400
-    
+        return jsonify({
+            "error": "Spotify top tracks isteği başarısız", 
+            "status_code": top_tracks_response.status_code
+        }), 400
     top_tracks = top_tracks_response.json()
-    
+
     # Top tracks listesinden şarkı ID'lerini alıyoruz.
     track_ids = [track["id"] for track in top_tracks.get("items", [])]
     if not track_ids:
         return jsonify({"error": "Hiç şarkı bulunamadı."}), 400
-    
-    # Audio Features endpoint'ini kullanarak şarkıların BPM (tempo) bilgilerini alıyoruz.
+
+    # Audio features endpoint'ini kullanarak şarkıların BPM (tempo) bilgilerini alıyoruz.
     audio_features_url = "https://api.spotify.com/v1/audio-features"
     features_params = {
         "ids": ",".join(track_ids)
     }
     audio_features_response = requests.get(audio_features_url, headers=headers, params=features_params)
-    
     if audio_features_response.status_code != 200:
-        return jsonify({"error": "Spotify audio features isteği başarısız", 
-                        "status_code": audio_features_response.status_code}), 400
-    
+        return jsonify({
+            "error": "Spotify audio features isteği başarısız", 
+            "status_code": audio_features_response.status_code
+        }), 400
     audio_features = audio_features_response.json()
-    
-    # Audio features listesini, track ID'lerine göre sözlük haline getiriyoruz.
+
+    # Audio features listesini track ID'sine göre sözlüğe dönüştürüyoruz.
     features_by_id = {}
     for feature in audio_features.get("audio_features", []):
         if feature and "id" in feature:
             features_by_id[feature["id"]] = feature
-    
-    # Sonuç listemizi oluşturuyoruz: şarkı adı, sanatçılar ve BPM bilgisi.
+
+    # Sonuç listesi: her şarkı için şarkı adı, sanatçılar ve BPM
     results = []
     for track in top_tracks.get("items", []):
         track_id = track.get("id")
@@ -69,7 +108,7 @@ def spotify_list():
             "artists": artists,
             "bpm": bpm
         })
-    
+
     return jsonify(results)
 
 if __name__ == '__main__':
