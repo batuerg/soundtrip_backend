@@ -25,34 +25,6 @@ def login():
     return redirect(SPOTIFY_AUTH_URL + auth_query)
 
 # /callback: Spotify, kullanıcı yetkilendirmesi sonrası bu endpoint'e yönlendirir
-@app.route('/callback')
-def callback():
-    code = request.args.get('code')
-    if not code:
-        return "Authentication failed: code not provided.", 400
-
-    payload = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_response = requests.post(SPOTIFY_TOKEN_URL, data=payload, headers=headers)
-    token_info = token_response.json()
-
-    # Bu satırı ekleyerek token yanıtını loglayabilirsiniz:
-    print("Token Yanıtı:", token_info)
-
-    access_token = token_info.get("access_token")
-    if not access_token:
-        return "Token exchange failed.", 400
-
-    return redirect(f"/spotify_list?access_token={access_token}")
-
-
-# /spotify_list: Kullanıcının son 6 ayın top track verisini ve her şarkının BPM bilgisini döner
 @app.route('/spotify_list', methods=['GET'])
 def spotify_list():
     access_token = request.args.get('access_token')
@@ -68,11 +40,16 @@ def spotify_list():
         "limit": 20
     }
     top_tracks_response = requests.get(top_tracks_url, headers=headers, params=params)
+    
+    # Bu satır, Spotify API'den gelen yanıtın detaylarını loglar.
+    print("Top Tracks Response:", top_tracks_response.text)
+    
     if top_tracks_response.status_code != 200:
         return jsonify({
             "error": "Spotify top tracks isteği başarısız", 
             "status_code": top_tracks_response.status_code
         }), 400
+
     top_tracks = top_tracks_response.json()
 
     # Top tracks listesinden şarkı ID'lerini alıyoruz.
@@ -91,6 +68,7 @@ def spotify_list():
             "error": "Spotify audio features isteği başarısız", 
             "status_code": audio_features_response.status_code
         }), 400
+
     audio_features = audio_features_response.json()
 
     # Audio features listesini track ID'sine göre sözlüğe dönüştürüyoruz.
@@ -113,6 +91,7 @@ def spotify_list():
         })
 
     return jsonify(results)
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
