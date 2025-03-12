@@ -42,12 +42,15 @@ def callback():
     token_response = requests.post(SPOTIFY_TOKEN_URL, data=payload, headers=headers)
     token_info = token_response.json()
 
+    # Bu satırı ekleyerek token yanıtını loglayabilirsiniz:
+    print("Token Yanıtı:", token_info)
+
     access_token = token_info.get("access_token")
     if not access_token:
         return "Token exchange failed.", 400
 
-    # Kullanıcıyı /spotify_list endpoint'ine yönlendiriyoruz, access_token URL'e ekleniyor.
     return redirect(f"/spotify_list?access_token={access_token}")
+
 
 # /spotify_list: Kullanıcının son 6 ayın top track verisini ve her şarkının BPM bilgisini döner
 @app.route('/spotify_list', methods=['GET'])
