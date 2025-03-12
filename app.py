@@ -1,15 +1,22 @@
 import os
+import sys
 import requests
+import logging
 from flask import Flask, request, redirect, jsonify
+
+# Logging yapılandırması: DEBUG seviyesinde log alınır.
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
 # Ortam değişkenlerinden alınan bilgiler
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = os.getenv("REDIRECT_URI")  # Örneğin: https://soundtripbackend-production.up.railway.app/callback
+# Örneğin: https://soundtripbackend-production.up.railway.app/callback
+REDIRECT_URI = os.getenv("REDIRECT_URI")
 
-# Spotify OAuth için gerekli URL'ler ve kapsamlar
+# Spotify OAuth URL'leri ve istenen izinler (scope)
 SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SCOPE = "user-top-read user-read-recently-played"
@@ -18,15 +25,16 @@ SCOPE = "user-top-read user-read-recently-played"
 def home():
     return "Welcome to SoundTrip! Integration successful, you can return back to Sound Trip on your browser to continue"
 
-# /login: Kullanıcıyı Spotify yetkilendirme sayfasına yönlendirir
+# /login: Kullanıcıyı Spotify yetkilendirme sayfasına yönlendirir.
 @app.route('/login')
 def login():
     auth_query = f"?response_type=code&client_id={CLIENT_ID}&scope={SCOPE}&redirect_uri={REDIRECT_URI}"
     full_url = SPOTIFY_AUTH_URL + auth_query
-    print("Redirecting to Spotify Auth URL:", full_url)
+    logger.debug("Redirecting to Spotify Auth URL: %s", full_url)
+    sys.stdout.flush()
     return redirect(full_url)
 
-# /callback: Spotify, kullanıcı yetkilendirmesi sonrası bu endpoint'e yönlendirir
+# /callback: Spotify, kullanıcı yetkilendirmesi sonrası bu endpoint'e yönlendirir.
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
@@ -45,16 +53,17 @@ def callback():
     token_info = token_response.json()
     
     # Token yanıtını logla
-    print("Token Yanıtı:", token_info)
+    logger.debug("Token Yanıtı: %s", token_info)
+    sys.stdout.flush()
     
     access_token = token_info.get("access_token")
     if not access_token:
         return "Token exchange failed.", 400
 
-    # Kullanıcıyı /spotify_list endpoint'ine yönlendiriyoruz, access_token URL'e ekleniyor.
+    # Kullanıcıyı /spotify_list endpoint'ine yönlendir, token URL'e eklenir.
     return redirect(f"/spotify_list?access_token={access_token}")
 
-# /spotify_list: Kullanıcının son 6 ayın top track verisini ve her şarkının BPM bilgisini döner
+# /spotify_list: Kullanıcının son 6 ayın top tracks verisini ve her şarkının BPM bilgisini döner.
 @app.route('/spotify_list', methods=['GET'])
 def spotify_list():
     access_token = request.args.get('access_token')
@@ -63,17 +72,16 @@ def spotify_list():
 
     headers = {"Authorization": f"Bearer {access_token}"}
 
-    # Kullanıcının medium_term (son 6 ay) top tracks'ini çekiyoruz.
+    # Spotify'dan medium_term (son 6 ay) top tracks verisini çekiyoruz.
     top_tracks_url = "https://api.spotify.com/v1/me/top/tracks"
     params = {
         "time_range": "medium_term",
         "limit": 20
     }
     top_tracks_response = requests.get(top_tracks_url, headers=headers, params=params)
-    
-    # Spotify API'den gelen yanıtı logla
-    print("Top Tracks Response Status Code:", top_tracks_response.status_code)
-    print("Top Tracks Response:", top_tracks_response.text)
+    logger.debug("Top Tracks Response Status Code: %s", top_tracks_response.status_code)
+    logger.debug("Top Tracks Response: %s", top_tracks_response.text)
+    sys.stdout.flush()
     
     if top_tracks_response.status_code != 200:
         return jsonify({
@@ -94,8 +102,9 @@ def spotify_list():
         "ids": ",".join(track_ids)
     }
     audio_features_response = requests.get(audio_features_url, headers=headers, params=features_params)
-    print("Audio Features Response Status Code:", audio_features_response.status_code)
-    print("Audio Features Response:", audio_features_response.text)
+    logger.debug("Audio Features Response Status Code: %s", audio_features_response.status_code)
+    logger.debug("Audio Features Response: %s", audio_features_response.text)
+    sys.stdout.flush()
     
     if audio_features_response.status_code != 200:
         return jsonify({
@@ -105,13 +114,13 @@ def spotify_list():
 
     audio_features = audio_features_response.json()
 
-    # Audio features listesini track ID'sine göre sözlüğe dönüştürüyoruz.
+    # Audio features listesini, track ID'sine göre sözlüğe dönüştürüyoruz.
     features_by_id = {}
     for feature in audio_features.get("audio_features", []):
         if feature and "id" in feature:
             features_by_id[feature["id"]] = feature
 
-    # Sonuç listesi: her şarkı için şarkı adı, sanatçılar ve BPM
+    # Sonuç listesi: her şarkı için şarkı adı, sanatçılar ve BPM.
     results = []
     for track in top_tracks.get("items", []):
         track_id = track.get("id")
@@ -124,7 +133,8 @@ def spotify_list():
             "bpm": bpm
         })
 
-    print("Final Results:", results)
+    logger.debug("Final Results: %s", results)
+    sys.stdout.flush()
     return jsonify(results)
 
 if __name__ == '__main__':
